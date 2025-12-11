@@ -22,6 +22,7 @@ func main() {
 	dbURL := os.Getenv("DB_URL")
 	platform := os.Getenv("PLATFORM")
 	jwtSecret := os.Getenv("JWT_SECRET")
+	polkaKey := os.Getenv("POLKA_KEY")
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -37,6 +38,7 @@ func main() {
 		db:        dbQueries,
 		platform:  platform,
 		jwtSecret: jwtSecret,
+		polkaKey:  polkaKey,
 	}
 
 	filepath := http.Dir(".")
@@ -62,6 +64,7 @@ func main() {
 	mux.HandleFunc("POST /api/revoke", apiCfg.handlerPostRevoke)
 	mux.HandleFunc("PUT /api/users", apiCfg.handlerPutUsers)
 	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.handlerDeleteChirp)
+	mux.HandleFunc("POST /api/polka/webhooks", apiCfg.handlerPostPolkaWebhooks)
 
 	s := http.Server{
 		Handler: mux,
