@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/MagnusTrier/chirpy/internal/auth"
@@ -92,10 +93,29 @@ func (cfg *apiConfig) handlerPostChirps(w http.ResponseWriter, r *http.Request) 
 func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	chirps, err := cfg.db.GetAllChirps(r.Context())
+	authorString := r.URL.Query().Get("author_id")
+
+	var chirps []database.Chirp
+	var err error
+
+	if authorString != "" {
+		authorID, err := uuid.Parse(authorString)
+		if err != nil {
+			returnError(w, err, 500)
+			return
+		}
+		chirps, err = cfg.db.GetAllChirpsFromUser(r.Context(), authorID)
+	} else {
+		chirps, err = cfg.db.GetAllChirps(r.Context())
+	}
+
 	if err != nil {
 		returnError(w, err, 500)
 		return
+	}
+
+	if order := r.URL.Query().Get("sort"); order == "desc" {
+		sort.Slice(chirps, func(i, j int) bool { return chirps[i].CreatedAt.After(chirps[j].CreatedAt) })
 	}
 
 	data, err := json.Marshal(chirps)
