@@ -1,127 +1,58 @@
 package main
 
 import (
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"net/http"
-	"strings"
-	"sync/atomic"
+	"os"
+
+	"github.com/MagnusTrier/chirpy/internal/database"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
-type apiConfig struct {
-	fileserverHits atomic.Int32
-}
-
-func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg.fileserverHits.Add(1)
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (cfg *apiConfig) handlerFileserverHits(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(200)
-
-	n := cfg.fileserverHits.Load()
-	body := fmt.Sprintf("<html><body><h1>Welcome, Chirpy Admin</h1><p>Chirpy has been visited %d times!</p></body></html>", n)
-
-	w.Write([]byte(body))
-}
-
-func (cfg *apiConfig) handlerResetFileserverHits(w http.ResponseWriter, r *http.Request) {
+func handlerHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(200)
-	cfg.fileserverHits.Store(0)
-}
-
-func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	type requestVals struct {
-		Body string `json:"body"`
-	}
-
-	type returnValsError struct {
-		Msg string `json:"error"`
-	}
-
-	defer r.Body.Close()
-
-	decoder := json.NewDecoder(r.Body)
-	params := requestVals{}
-	if err := decoder.Decode(&params); err != nil {
-		w.WriteHeader(500)
-
-		data, err := json.Marshal(returnValsError{Msg: fmt.Sprintf("Error decoding parameters: %s", err)})
-		if err != nil {
-			fmt.Print(err)
-			return
-		}
-		w.Write(data)
-		return
-	}
-
-	if len(params.Body) > 140 {
-		w.WriteHeader(400)
-		data, err := json.Marshal(returnValsError{Msg: "chirp is too long"})
-		if err != nil {
-			w.WriteHeader(500)
-			fmt.Print(err)
-			return
-		}
-		w.Write(data)
-		return
-	}
-
-	notAllowed := []string{"kerfuffle", "sharbert", "fornax", "Kerfuffle", "Sharbert", "Fornax"}
-	cleanedChirp := params.Body
-
-	for _, w := range notAllowed {
-		cleanedChirp = strings.ReplaceAll(cleanedChirp, w, "****")
-	}
-
-	type returnValsSuccess struct {
-		CleanedBody string `json:"cleaned_body"`
-	}
-
-	resBody := returnValsSuccess{
-		CleanedBody: cleanedChirp,
-	}
-
-	data, err := json.Marshal(resBody)
-	if err != nil {
-		w.WriteHeader(500)
-		fmt.Printf("Error marshalling JSON: %s", err)
-		return
-	}
-
-	w.WriteHeader(200)
-	w.Write(data)
+	w.Write([]byte("OK"))
 }
 
 func main() {
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	platform := os.Getenv("PLATFORM")
+
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		fmt.Print(err)
+		return
+	}
+
+	dbQueries := database.New(db)
 
 	mux := http.NewServeMux()
 
-	cfg := apiConfig{}
+	apiCfg := apiConfig{
+		db:       dbQueries,
+		platform: platform,
+	}
 
 	filepath := http.Dir(".")
 
-	customHandler := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(200)
-		w.Write([]byte("OK"))
-	}
-
 	handler := http.StripPrefix("/app/", http.FileServer(filepath))
 
-	mux.Handle("/app/", cfg.middlewareMetricsInc(handler))
+	mux.Handle("/app/", apiCfg.middlewareMetricsInc(handler))
 
-	mux.HandleFunc("GET /api/healthz", customHandler)
-	mux.HandleFunc("GET /admin/metrics", cfg.handlerFileserverHits)
-	mux.HandleFunc("POST /admin/reset", cfg.handlerResetFileserverHits)
+	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerFileserverHits)
+	mux.HandleFunc("POST /admin/reset", apiCfg.handlerResetUsers)
 
-	mux.HandleFunc("POST /api/validate_chirp", handlerValidateChirp)
+	mux.HandleFunc("GET /api/healthz", handlerHealthz)
+
+	mux.HandleFunc("POST /api/chirps", apiCfg.handlerPostChirps)
+	mux.HandleFunc("GET /api/chirps", apiCfg.handlerGetChirps)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGetChirp)
+
+	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
 
 	s := http.Server{
 		Handler: mux,
