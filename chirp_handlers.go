@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/MagnusTrier/chirpy/internal/auth"
 	"github.com/MagnusTrier/chirpy/internal/database"
 	"github.com/google/uuid"
 )
@@ -22,6 +23,18 @@ func (cfg *apiConfig) handlerPostChirps(w http.ResponseWriter, r *http.Request) 
 		Msg string `json:"error"`
 	}
 
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		returnError(w, err, 403)
+		return
+	}
+
+	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		returnError(w, err, 401)
+		return
+	}
+
 	defer r.Body.Close()
 
 	decoder := json.NewDecoder(r.Body)
@@ -31,7 +44,7 @@ func (cfg *apiConfig) handlerPostChirps(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if _, err := cfg.db.GetUser(r.Context(), params.UserID); err != nil {
+	if _, err := cfg.db.GetUser(r.Context(), userID); err != nil {
 		returnError(w, err, 500)
 		return
 	}
@@ -57,7 +70,7 @@ func (cfg *apiConfig) handlerPostChirps(w http.ResponseWriter, r *http.Request) 
 
 	chirpArgs := database.CreateChirpParams{
 		Body:   cleanedChirp,
-		UserID: params.UserID,
+		UserID: userID,
 	}
 	chirp, err := cfg.db.CreateChirp(r.Context(), chirpArgs)
 	if err != nil {

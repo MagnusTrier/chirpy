@@ -21,6 +21,7 @@ func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
 	platform := os.Getenv("PLATFORM")
+	jwtSecret := os.Getenv("JWT_SECRET")
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -33,8 +34,9 @@ func main() {
 	mux := http.NewServeMux()
 
 	apiCfg := apiConfig{
-		db:       dbQueries,
-		platform: platform,
+		db:        dbQueries,
+		platform:  platform,
+		jwtSecret: jwtSecret,
 	}
 
 	filepath := http.Dir(".")
@@ -52,7 +54,12 @@ func main() {
 	mux.HandleFunc("GET /api/chirps", apiCfg.handlerGetChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGetChirp)
 
-	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
+	mux.HandleFunc("POST /api/users", apiCfg.handlerPostUsers)
+
+	mux.HandleFunc("POST /api/login", apiCfg.handlerPostLogin)
+
+	mux.HandleFunc("POST /api/refresh", apiCfg.handlerPostRefresh)
+	mux.HandleFunc("POST /api/revoke", apiCfg.handlerPostRevoke)
 
 	s := http.Server{
 		Handler: mux,
