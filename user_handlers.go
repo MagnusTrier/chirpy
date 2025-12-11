@@ -210,6 +210,7 @@ func (cfg *apiConfig) handlerPostRevoke(w http.ResponseWriter, r *http.Request) 
 	token, err := auth.GetBearerToken(r.Header)
 	if err != nil {
 		returnError(w, err, 401)
+		return
 	}
 
 	if err := cfg.db.RevokeToken(r.Context(), token); err != nil {
@@ -217,4 +218,69 @@ func (cfg *apiConfig) handlerPostRevoke(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.WriteHeader(204)
+}
+
+func (cfg *apiConfig) handlerPutUsers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		returnError(w, err, 401)
+		return
+	}
+
+	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		returnError(w, err, 401)
+		return
+	}
+
+	type requestVals struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	defer r.Body.Close()
+
+	decoder := json.NewDecoder(r.Body)
+	params := requestVals{}
+	if err := decoder.Decode(&params); err != nil {
+		returnError(w, err, 500)
+		return
+	}
+
+	hashed, err := auth.HashPassword(params.Password)
+	if err != nil {
+		returnError(w, err, 500)
+		return
+	}
+
+	updateUserArgs := database.UpdateUserParams{
+		ID:             userID,
+		HashedPassword: hashed,
+		Email:          params.Email,
+	}
+
+	user, err := cfg.db.UpdateUser(r.Context(), updateUserArgs)
+	if err != nil {
+		returnError(w, err, 500)
+		return
+	}
+
+	responseData := userPublicInfo{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	}
+
+	data, err := json.Marshal(responseData)
+	if err != nil {
+		w.WriteHeader(500)
+		fmt.Print(err)
+		return
+	}
+
+	w.WriteHeader(200)
+	w.Write((data))
+
 }
